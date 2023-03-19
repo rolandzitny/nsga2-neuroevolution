@@ -422,6 +422,12 @@ class LSTMAutoencoder:
         return mutated_lstm_autoencoder
 
     def crossover(self, other_lstm_autoencoder):
+        """
+        One-point crossover of two architectures. Crossover point is chosen randomly.
+
+        :param other_lstm_autoencoder: other LSTMAutoencoder object
+        :return: two crossed LSTMAutoencoder objects
+        """
         self_encoded = self.encode()
         other_encoded = other_lstm_autoencoder.encode()
 
