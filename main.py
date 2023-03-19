@@ -20,8 +20,8 @@ def main():
     y.decode(arch2)
     z.decode(arch3)
 
-    res = z.mutate(mutation_number=8, unique=False, hyper_random=False, change_rate=0.2)
-
+    model = z.build_model()
+    model.summary()
 
 if __name__ == '__main__':
     main()

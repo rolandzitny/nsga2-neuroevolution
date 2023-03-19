@@ -126,6 +126,33 @@ class LSTMAutoencoder:
         As optimizer is used RMSprop commonly used in recurrent nn and as loss function Mean Squared Error.
         Adam and MAE is also possible to use.
 
+        Example summary:
+        ________________________________________________________________________________
+         Layer (type)                               Output Shape              Param #
+        ================================================================================
+         input_1 (InputLayer)                      [(None, 180, 6)]          0
+
+         lstm (LSTM)                               (None, 180, 4)            176
+
+         dropout (Dropout)                         (None, 180, 4)            0
+
+         batch_normalization (BatchNormalization)  (None, 180, 4)            16
+
+         lstm_1 (LSTM)                             (None, 180, 5)            200
+
+         dropout_1 (Dropout)                       (None, 180, 5)            0
+
+         batch_normalization_1 (BatchNormalization)(None, 180, 5)            20
+
+         lstm_2 (LSTM)                             (None, 180, 6)            288
+
+         dropout_2 (Dropout)                       (None, 180, 6)            0
+
+         batch_normalization_2 (BatchNormalization)(None, 180, 6)            24
+
+         time_distributed (TimeDistributed)        (None, 180, 6)            42
+         ================================================================================
+
         :return: compiled keras model
         """
         inputs = tf.keras.Input(shape=self.input_shape)
