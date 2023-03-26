@@ -1,27 +1,44 @@
+from src.utils.dataset_tools import get_training_testing_windows
 from src.representations.lstm_autoencoder import LSTMAutoencoder
+from src.evolution_algorithms.nsga2.nsga2 import NSGA2
 
 
 def main():
-    print("Start ... ")
-    arch1 = {'num_layers': 1, 'dense_activation': 'linear', 'layers': [{'type': 'LSTM', 'units': 1, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2, 'use_batchnorm': True}]}
-    arch2 = {'num_layers': 2, 'dense_activation': 'linear', 'layers': [{'type': 'LSTM', 'units': 2, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2, 'use_batchnorm': True}, {'type': 'LSTM', 'units': 3, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2, 'use_batchnorm': True}]}
-    arch3 = {'num_layers': 3, 'dense_activation': 'linear', 'layers': [
-        {'type': 'LSTM', 'units': 4, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2,
-         'use_batchnorm': True},
-        {'type': 'LSTM', 'units': 5, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2,
-         'use_batchnorm': True}, {'type': 'LSTM', 'units': 6, 'activation': 'tanh', 'recurrent_activation': 'sigmoid', 'dropout': 0.2,
-         'use_batchnorm': True}]}
+    csv_file = 'data/dataset.csv'
+    x_train, y_train, x_test, y_test = get_training_testing_windows(csv_file, sequence_length=200, train_size=0.8,
+                                                                    size_train=100, size_test=100)
 
-    x = LSTMAutoencoder(input_shape=(180, 6), output_shape=6, max_lstm_layers=5)
-    y = LSTMAutoencoder(input_shape=(180, 6), output_shape=6, max_lstm_layers=5)
-    z = LSTMAutoencoder(input_shape=(180, 6), output_shape=6, max_lstm_layers=5)
+    train_test_data = {
+        'epochs': 1,
+        'batch_size': 32,
+        'x_train': x_train,
+        'y_train': y_train,
+        'x_test': x_test,
+        'y_test': y_test
+    }
 
-    x.decode(arch1)
-    y.decode(arch2)
-    z.decode(arch3)
+    # Same way we can use crossover parameters.
+    mutation_parameters = {
+        'mutation_number': 1,
+        'unique': False,
+        'lstm_random': True,
+        'change_rate': 0.2
+    }
 
-    model = z.build_model()
-    model.summary()
+    representation_object = LSTMAutoencoder(input_shape=(180, 6),
+                                            output_shape=(20, 6),
+                                            max_lstm_layers=5,
+                                            train_test_data=train_test_data,
+                                            mutation_parameters=mutation_parameters)
+
+    ea = NSGA2(population_size=5, max_generations=50, num_objectives=3, optimization_directions=['min', 'min', 'min'], mutation_probability=0.5, representation_object=representation_object)
+
+    ea.create_initial_population()
+
+    ea.sort_population()
+
+    ea.new_generation()
+
 
 if __name__ == '__main__':
     main()
