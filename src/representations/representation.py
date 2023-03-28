@@ -16,10 +16,6 @@ class Representation(ABC):
 
     @abstractmethod
     def create_initial_population(self, population_size):
-        """
-
-        :rtype: object
-        """
         pass
 
     @abstractmethod

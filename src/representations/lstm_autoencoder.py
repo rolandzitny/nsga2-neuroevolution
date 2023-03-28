@@ -1,10 +1,11 @@
 """
 This class implements the representation of an LSTM autoencoder so that it can be used in evolutionary algorithms.
 """
+import math
 import uuid
 import random
 import tensorflow as tf
-from memory_profiler import memory_usage
+import tracemalloc
 from keras.optimizers import RMSprop
 from keras.losses import MeanSquaredError
 from src.representations.representation import Representation
@@ -12,7 +13,7 @@ from keras.layers import LSTM, Dropout, BatchNormalization, TimeDistributed, Den
 
 
 class LSTMAutoencoder(Representation):
-    def __init__(self, input_shape, output_shape, max_lstm_layers, train_test_data, mutation_parameters):
+    def __init__(self, input_shape, output_shape, train_test_data, mutation_methods, mutation_parameters):
         """
         Create dictionary representation class for LSTM AutoEncoder used for multivariate signal forecasting.
         Whole idea is to forecast 20 new timestamps/rows from initial 180 timestamps/rows of multivariate signal.
@@ -68,7 +69,6 @@ class LSTMAutoencoder(Representation):
 
         :param input_shape: Input shape e.g. (180, 6), 180 rows with 6 values.
         :param output_shape: Number of timestamps and number of forecasted values in one timestamp, e.g. (20, 6).
-        :param max_lstm_layers: Defines maximal number of lstm layers in encoder and decoder, used in mutation.
         :param train_test_data: Is dictionary with x_train, y_train, x_test and y_test numpy arrays, those arrays must.
         be in specific shape for LSTM Autoencoder, e.g. (samples, 180, 6) for x_train and (samples, 20, 6) for y_train.
         Function for creating such dictionary is in src/utils/dataset_tools.py.
@@ -78,8 +78,8 @@ class LSTMAutoencoder(Representation):
         self.__name__ = str(uuid.uuid4())[:8]
         self.input_shape = input_shape
         self.output_shape = output_shape
-        self.max_lstm_layers = max_lstm_layers
         self.train_test_data = train_test_data
+        self.mutation_methods = mutation_methods
         self.mutation_parameters = mutation_parameters
 
         self.num_encoder_layers = None
@@ -87,8 +87,64 @@ class LSTMAutoencoder(Representation):
         self.dense_activation = None
         self.encoder_layers = []
         self.decoder_layers = []
-
         self.model = None
+
+        self.mutation_number = self.mutation_parameters['mutation_number']
+        self.unique = self.mutation_parameters['unique']
+        lstm_random = self.mutation_parameters['lstm_random']
+        max_lstm_layers = self.mutation_parameters['max_lstm_layers']
+        change_rate = self.mutation_parameters['change_rate']
+
+        self.prepared_mutation_methods = []
+        self.prepared_mutation_methods_nonfail = []
+
+        # Mutation methods in form: (method, parameters dictionary)
+        for mutation_name in self.mutation_methods:
+            if mutation_name == 'LSTM1_ADD':
+                method = (self._add_lstm1_mutation, {'lstm_random': lstm_random, 'max_lstm_layers': max_lstm_layers})
+                self.prepared_mutation_methods.append(method)
+
+            elif mutation_name == 'LSTM1_REMOVE':
+                method = (self._remove_lstm1_mutation, {})
+                self.prepared_mutation_methods.append(method)
+
+            elif mutation_name == 'LSTM2_ADD':
+                method = (self._add_lstm2_mutation, {'lstm_random': lstm_random, 'max_lstm_layers': max_lstm_layers})
+                self.prepared_mutation_methods.append(method)
+
+            elif mutation_name == 'LSTM2_REMOVE':
+                method = (self._remove_lstm2_mutation, {})
+                self.prepared_mutation_methods.append(method)
+
+            elif mutation_name == 'DENSE_ACT':
+                method = (self._dense_layer_mutation, {})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
+
+            elif mutation_name == 'LSTM_UNITS':
+                method = (self._lstm_units_mutation, {'change_rate': change_rate})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
+
+            elif mutation_name == 'LSTM_ACT':
+                method = (self._lstm_activation_mutation, {})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
+
+            elif mutation_name == 'LSTM_REC_ACT':
+                method = (self._lstm_rec_activation_mutation, {})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
+
+            elif mutation_name == 'LSTM_DROPOUT':
+                method = (self._lstm_dropout_mutation, {})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
+
+            elif mutation_name == 'LSTM_BATCHNORM':
+                method = (self._lstm_batch_norm_mutation, {})
+                self.prepared_mutation_methods.append(method)
+                self.prepared_mutation_methods_nonfail.append(method)
 
     def _create_initial_representation(self):
         """
@@ -103,7 +159,15 @@ class LSTMAutoencoder(Representation):
         self.encoder_layers = [
             {
                 "type": "LSTM",
-                "units": 16,
+                "units": 128,
+                "activation": "tanh",
+                "recurrent_activation": "sigmoid",
+                "dropout": 0.2,
+                "use_batchnorm": True
+            },
+            {
+                "type": "LSTM",
+                "units": 64,
                 "activation": "tanh",
                 "recurrent_activation": "sigmoid",
                 "dropout": 0.2,
@@ -114,7 +178,15 @@ class LSTMAutoencoder(Representation):
         self.decoder_layers = [
             {
                 "type": "LSTM",
-                "units": 16,
+                "units": 64,
+                "activation": "tanh",
+                "recurrent_activation": "sigmoid",
+                "dropout": 0.2,
+                "use_batchnorm": True
+            },
+            {
+                "type": "LSTM",
+                "units": 128,
                 "activation": "tanh",
                 "recurrent_activation": "sigmoid",
                 "dropout": 0.2,
@@ -272,18 +344,119 @@ class LSTMAutoencoder(Representation):
                   batch_size=batch_size,
                   validation_data=(x_test, y_test),
                   shuffle=False,
-                  verbose=False)
+                  verbose=0)
 
         self.model = model
         return self.model
 
-    def _add_lstm_mutation(self, lstm_random):
+    def _add_lstm2_mutation(self, lstm_random, max_lstm_layers):
+        """
+        Adds one more LSTM layer at end of encoder part and one at start of decoder part
+        if maximal number of layers is not reached.
+
+        :param lstm_random: True/False -> whether to randomly set hyper-parameters of new LST layer
+        or copy hyper-parameters of last LSTM layer.
+        :param max_lstm_layers: Maximal number of LSTM layers in encoder and decoder parts.
+        :return: Mutated encoded architecture.
+        """
+        units = [16, 32, 64, 128, 256]
+        activation = ['sigmoid', 'tanh', 'relu', 'softmax', 'linear']
+        rec_activation = ['sigmoid', 'hard_sigmoid', 'tanh', 'relu', 'linear']
+        dropout_choices = [False, 0.1, 0.2, 0.3, 0.4, 0.5]
+        batch_norm_choices = [True, False]
+
+        encoded_architecture = self.encode()
+
+        encoder_length = int(encoded_architecture['num_encoder_layers'])
+        decoder_length = int(encoded_architecture['num_decoder_layers'])
+        encoder_layers = encoded_architecture['encoder_layers']
+        decoder_layers = encoded_architecture['decoder_layers']
+
+        if encoder_length < max_lstm_layers and decoder_length < max_lstm_layers:
+            # Randomly choose hyper-parameters of new LSTM layer
+            if lstm_random:
+                encoder_lstm_layer = {
+                    "type": "LSTM",
+                    "units": random.choice(units),
+                    "activation": random.choice(activation),
+                    "recurrent_activation": random.choice(rec_activation),
+                    "dropout": random.choice(dropout_choices),
+                    "use_batchnorm": random.choice(batch_norm_choices)
+                }
+
+                decoder_lstm_layer = {
+                    "type": "LSTM",
+                    "units": random.choice(units),
+                    "activation": random.choice(activation),
+                    "recurrent_activation": random.choice(rec_activation),
+                    "dropout": random.choice(dropout_choices),
+                    "use_batchnorm": random.choice(batch_norm_choices)
+                }
+
+                encoder_layers.insert(encoder_length, encoder_lstm_layer)
+                encoded_architecture['encoder_layers'] = encoder_layers
+                encoded_architecture['num_encoder_layers'] = str(encoder_length + 1)
+
+                decoder_layers.insert(0, decoder_lstm_layer)
+                encoded_architecture['decoder_layers'] = decoder_layers
+                encoded_architecture['num_decoder_layers'] = str(decoder_length + 1)
+
+                return encoded_architecture
+
+            # Copy last lstm layer and add it into architecture
+            else:
+                encoder_lstm_layer = encoder_layers[-1]
+                decoder_lstm_layer = decoder_layers[0]
+
+                encoder_layers.insert(encoder_length, encoder_lstm_layer)
+                encoded_architecture['encoder_layers'] = encoder_layers
+                encoded_architecture['num_encoder_layers'] = str(encoder_length + 1)
+
+                decoder_layers.insert(0, decoder_lstm_layer)
+                encoded_architecture['decoder_layers'] = decoder_layers
+                encoded_architecture['num_decoder_layers'] = str(decoder_length + 1)
+
+                return encoded_architecture
+        else:
+            return False
+
+    def _remove_lstm2_mutation(self):
+        """
+        Remove LSTM layer from end of encoder and start of decoder.
+
+        :return: Mutated encoded architecture.
+        """
+        encoded_architecture = self.encode()
+
+        encoder_length = int(encoded_architecture['num_encoder_layers'])
+        decoder_length = int(encoded_architecture['num_decoder_layers'])
+        encoder_layers = encoded_architecture['encoder_layers']
+        decoder_layers = encoded_architecture['decoder_layers']
+
+        if encoder_length > 1 and decoder_length > 1:
+            encoder_layers.pop(encoder_length - 1)
+            decoder_layers.pop(0)
+
+            encoded_architecture['encoder_layers'] = encoder_layers
+            encoded_architecture['num_encoder_layers'] = str(encoder_length - 1)
+
+            encoded_architecture['decoder_layers'] = decoder_layers
+            encoded_architecture['num_decoder_layers'] = str(decoder_length - 1)
+
+            return encoded_architecture
+
+        else:
+            # If mutation is not possible return False and do another mutation
+            return False
+
+    def _add_lstm1_mutation(self, lstm_random, max_lstm_layers):
         """
         Adds one more LSTM layer on random space of architecture if maximal number of layers is not reached.
 
         :param lstm_random: True/False -> whether to randomly set hyper-parameters of new LST layer
         or copy hyper-parameters of last LSTM layer.
-        :return: Mutated LSTMAutoencoder object or False if number of maximal number of layers has been reached.
+        :param max_lstm_layers: Maximal number of LSTM layers in encoder and decoder parts.
+        :return: Mutated encoded architecture.
         """
         # Random possibilities of hyper-parameters values
         units = [8, 16, 32, 64, 128, 256]
@@ -297,7 +470,7 @@ class LSTMAutoencoder(Representation):
                                            ('num_decoder_layers', 'decoder_layers')])
 
         encoded_architecture = self.encode()
-        if int(encoded_architecture[architecture_part[0]]) < self.max_lstm_layers:
+        if int(encoded_architecture[architecture_part[0]]) < max_lstm_layers:
             encoded_architecture[architecture_part[0]] = str(int(encoded_architecture[architecture_part[0]]) + 1)
 
             # Randomly choose hyper-parameters of new LSTM layer
@@ -316,13 +489,7 @@ class LSTMAutoencoder(Representation):
                 random_index = random.randint(0, len(lstm_layers))
                 lstm_layers.insert(random_index, new_lstm_layer)
                 encoded_architecture[architecture_part[1]] = lstm_layers
-                mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                           self.output_shape,
-                                                           self.max_lstm_layers,
-                                                           self.train_test_data,
-                                                           self.mutation_parameters)
-                mutated_lstm_autoencoder.decode(encoded_architecture)
-                return mutated_lstm_autoencoder
+                return encoded_architecture
 
             # Copy last lstm layer and add it into architecture
             else:
@@ -332,22 +499,16 @@ class LSTMAutoencoder(Representation):
                 random_index = random.randint(0, len(lstm_layers))
                 lstm_layers.insert(random_index, new_lstm_layer)
                 encoded_architecture[architecture_part[1]] = lstm_layers
-                mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                           self.output_shape,
-                                                           self.max_lstm_layers,
-                                                           self.train_test_data,
-                                                           self.mutation_parameters)
-                mutated_lstm_autoencoder.decode(encoded_architecture)
-                return mutated_lstm_autoencoder
+                return encoded_architecture
         else:
             # If mutation is not possible (max lstm layers) return False and do another mutation
             return False
 
-    def _remove_lstm_mutation(self):
+    def _remove_lstm1_mutation(self):
         """
         Remove random LSTM layer from architecture.
 
-        :return: Mutated LSTMAutoencoder object or False if number of maximal number of layers has been reached.
+        :return: Mutated encoded architecture.
         """
         # Choose whether to mutate encoder od decoder part, encoder -> 0, decoder -> 1
         architecture_part = random.choice([('num_encoder_layers', 'encoder_layers'),
@@ -361,13 +522,8 @@ class LSTMAutoencoder(Representation):
             index = random.randint(0, len(lstm_layers) - 1)
             lstm_layers.pop(index)
             encoded_architecture[architecture_part[1]] = lstm_layers
-            mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                       self.output_shape,
-                                                       self.max_lstm_layers,
-                                                       self.train_test_data,
-                                                       self.mutation_parameters)
-            mutated_lstm_autoencoder.decode(encoded_architecture)
-            return mutated_lstm_autoencoder
+
+            return encoded_architecture
         else:
             # If mutation is not possible return False and do another mutation
             return False
@@ -376,7 +532,7 @@ class LSTMAutoencoder(Representation):
         """
         Mutate activation function of last Dense layer.
 
-        :return: Mutated LSTMAutoencoder object.
+        :return: Mutated encoded architecture.
         """
         encoded_architecture = self.encode()
         dense_activation = encoded_architecture['dense_activation']
@@ -384,20 +540,14 @@ class LSTMAutoencoder(Representation):
         # Remove used activation function to avoid repeating/neutral mutation
         dense_activation_functions.remove(dense_activation)
         encoded_architecture['dense_activation'] = random.choice(dense_activation_functions)
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def _lstm_units_mutation(self, change_rate):
         """
         Mutate number of LSTM units in random LSTM layer.
 
         :param change_rate: Rate of units change, e.g. 0.2 mean range -20%/+20% of previous value.
-        :return: Mutated LSTMAutoencoder object.
+        :return: Mutated encoded architecture.
         """
         # Choose whether to mutate encoder od decoder part, encoder -> 0, decoder -> 1
         architecture_part = random.choice([('num_encoder_layers', 'encoder_layers'),
@@ -413,19 +563,13 @@ class LSTMAutoencoder(Representation):
         new_lstm_units = random.randint(lower_bound, upper_bound)
         lstm_layers[random_lstm_layer_idx]['units'] = new_lstm_units
         encoded_architecture[architecture_part[1]] = lstm_layers
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def _lstm_activation_mutation(self):
         """
         Mutate activation function in random LSTM layer.
 
-        :return: Mutated LSTMAutoencoder object.
+        :return: Mutated encoded architecture.
         """
         # Choose whether to mutate encoder od decoder part, encoder -> 0, decoder -> 1
         architecture_part = random.choice([('num_encoder_layers', 'encoder_layers'),
@@ -440,13 +584,7 @@ class LSTMAutoencoder(Representation):
         activation.remove(current_lstm_activation)
         lstm_layers[random_lstm_layer_idx]['activation'] = random.choice(activation)
         encoded_architecture[architecture_part[1]] = lstm_layers
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def _lstm_rec_activation_mutation(self):
         """
@@ -467,13 +605,7 @@ class LSTMAutoencoder(Representation):
         rec_activation.remove(current_lstm_rec_activation)
         lstm_layers[random_lstm_layer_idx]['recurrent_activation'] = random.choice(rec_activation)
         encoded_architecture[architecture_part[1]] = lstm_layers
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def _lstm_dropout_mutation(self):
         """
@@ -494,13 +626,7 @@ class LSTMAutoencoder(Representation):
         dropouts.remove(current_lstm_dropout)
         lstm_layers[random_lstm_layer_idx]['dropout'] = random.choice(dropouts)
         encoded_architecture[architecture_part[1]] = lstm_layers
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def _lstm_batch_norm_mutation(self):
         """
@@ -521,13 +647,7 @@ class LSTMAutoencoder(Representation):
         batch_norm_uses.remove(current_lstm_use_batch)
         lstm_layers[random_lstm_layer_idx]['use_batchnorm'] = random.choice(batch_norm_uses)
         encoded_architecture[architecture_part[1]] = lstm_layers
-        mutated_lstm_autoencoder = LSTMAutoencoder(self.input_shape,
-                                                   self.output_shape,
-                                                   self.max_lstm_layers,
-                                                   self.train_test_data,
-                                                   self.mutation_parameters)
-        mutated_lstm_autoencoder.decode(encoded_architecture)
-        return mutated_lstm_autoencoder
+        return encoded_architecture
 
     def mutate(self):
         """
@@ -535,49 +655,35 @@ class LSTMAutoencoder(Representation):
         This method always do some mutation, it means in case of failed mutation method it will randomly choose
         from method which will not fail.
 
-        # TODO choose/remove which method to use or not -> parameter[list] which will update mutation_methods list.
+        :mutation_parameters mutation_number: Number of mutations.
+        :mutation_parameters unique: True/False -> When mutation_number is bigger than,
+        whether to use only unique mutations.
+        :mutation_parameters lstm_random: True/False -> Whether to randomly set hyper-parameters of new LSTM layer.
+        :mutation_parameters max_lstm_layers: Defines maximal number of lstm layers in encoder and decoder parts.
+        :mutation_parameters change_rate: Rate of units change, for example 0.2.
         """
-        mutation_number = self.mutation_parameters['mutation_number']
-        unique = self.mutation_parameters['unique']
-        lstm_random = self.mutation_parameters['lstm_random']
-        change_rate = self.mutation_parameters['change_rate']
-
-        # Mutation methods in form: (method, parameters dictionary)
-        mutation_methods = [(self._add_lstm_mutation, {'hyper_random': lstm_random}),
-                            (self._remove_lstm_mutation, {}),
-                            (self._dense_layer_mutation, {}),
-                            (self._lstm_units_mutation, {'change_rate': change_rate}),
-                            (self._lstm_activation_mutation, {}),
-                            (self._lstm_rec_activation_mutation, {}),
-                            (self._lstm_dropout_mutation, {}),
-                            (self._lstm_batch_norm_mutation, {})]
-
-        mutated_lstm_autoencoder = None
-
+        mutated_architecture = self.encode()
         # Choose only unique mutations
-        if unique:
-            mutations = random.sample(mutation_methods, k=mutation_number)
+        if self.unique:
+            mutations = random.sample(self.prepared_mutation_methods, k=self.mutation_number)
             for mutation in mutations:
                 method = mutation[0]
                 params = mutation[1]
-                mutated_lstm_autoencoder = method(**params)
+                mutated_architecture = method(**params)
 
                 # If any mutations fails, randomly choose another one
-                if not mutated_lstm_autoencoder:
-                    nonfail_mutation_methods = [(self._dense_layer_mutation, {}),
-                                                (self._lstm_units_mutation, {'change_rate': change_rate}),
-                                                (self._lstm_activation_mutation, {}),
-                                                (self._lstm_rec_activation_mutation, {}),
-                                                (self._lstm_dropout_mutation, {}),
-                                                (self._lstm_batch_norm_mutation, {})]
-                    method, params = random.choice(nonfail_mutation_methods)
-                    mutated_lstm_autoencoder = method(**params)
+                if not mutated_architecture:
+                    try:
+                        method, params = random.choice(self.prepared_mutation_methods_nonfail)
+                        mutated_architecture = method(**params)
+                    except:
+                        mutated_architecture = self.encode()
 
-                self.decode(mutated_lstm_autoencoder.encode())
+                self.decode(mutated_architecture)
 
         # Mutations can repeat
         else:
-            mutations = random.choices(mutation_methods, k=mutation_number)
+            mutations = random.choices(self.prepared_mutation_methods, k=self.mutation_number)
             for mutation in mutations:
                 method = mutation[0]
                 params = mutation[1]
@@ -585,52 +691,41 @@ class LSTMAutoencoder(Representation):
 
                 # If any mutations fails, randomly choose another one
                 if not mutated_lstm_autoencoder:
-                    nonfail_mutation_methods = [(self._dense_layer_mutation, {}),
-                                                (self._lstm_units_mutation, {'change_rate': change_rate}),
-                                                (self._lstm_activation_mutation, {}),
-                                                (self._lstm_rec_activation_mutation, {}),
-                                                (self._lstm_dropout_mutation, {}),
-                                                (self._lstm_batch_norm_mutation, {})]
-                    method, params = random.choice(nonfail_mutation_methods)
-                    mutated_lstm_autoencoder = method(**params)
+                    try:
+                        method, params = random.choice(self.prepared_mutation_methods_nonfail)
+                        mutated_architecture = method(**params)
+                    except:
+                        mutated_architecture = self.encode()
 
-                self.decode(mutated_lstm_autoencoder.encode())
+                self.decode(mutated_architecture)
 
-        return mutated_lstm_autoencoder
+        return self
 
     def crossover(self, other_representation):
         """
         One-point crossover of two architectures. Crossover point is chosen randomly.
 
         :param other_representation: Other LSTMAutoencoder object.
-        :return: Two crossed LSTMAutoencoder objects.
+        :return: One crossed LSTMAutoencoder objects.
         """
+        # Choose whether to mutate encoder od decoder part, encoder -> 0, decoder -> 1
+        architecture_part = random.choice([('num_encoder_layers', 'encoder_layers'),
+                                           ('num_decoder_layers', 'decoder_layers')])
+
         self_encoded = self.encode()
         other_encoded = other_representation.encode()
 
-        # 1. encoder and 2. decoder
-        self_encoded['num_decoder_layers'] = other_encoded['num_decoder_layers']
-        self_encoded['decoder_layers'] = other_encoded['decoder_layers']
+        other_encoded[architecture_part[0]] = self_encoded[architecture_part[0]]
+        other_encoded[architecture_part[1]] = self_encoded[architecture_part[1]]
 
-        # 2. encoder and 1.encoder
-        other_encoded['num_encoder_layers'] = self_encoded['num_encoder_layers']
-        other_encoded['encoder_layers'] = self_encoded['encoder_layers']
+        individual = LSTMAutoencoder(input_shape=self.input_shape,
+                                     output_shape=self.output_shape,
+                                     train_test_data=self.train_test_data,
+                                     mutation_methods=self.mutation_methods,
+                                     mutation_parameters=self.mutation_parameters)
+        individual.decode(other_encoded)
 
-        crossed1_lstm_ae = LSTMAutoencoder(self.input_shape,
-                                           self.output_shape,
-                                           self.max_lstm_layers,
-                                           self.train_test_data,
-                                           self.mutation_parameters)
-        crossed1_lstm_ae.decode(self_encoded)
-
-        crossed2_lstm_ae = LSTMAutoencoder(self.input_shape,
-                                           self.output_shape,
-                                           self.max_lstm_layers,
-                                           self.train_test_data,
-                                           self.mutation_parameters)
-        crossed2_lstm_ae.decode(other_encoded)
-
-        return crossed1_lstm_ae, crossed2_lstm_ae
+        return individual
 
     def create_initial_population(self, population_size):
         """
@@ -642,9 +737,14 @@ class LSTMAutoencoder(Representation):
         """
         initial_population = []
         for i in range(population_size):
-            self._create_initial_representation()
-            mutated_individual = self.mutate()
-            initial_population.append(mutated_individual)
+            individual = LSTMAutoencoder(input_shape=self.input_shape,
+                                         output_shape=self.output_shape,
+                                         train_test_data=self.train_test_data,
+                                         mutation_methods=self.mutation_methods,
+                                         mutation_parameters=self.mutation_parameters)
+            individual._create_initial_representation()
+            individual.mutate()
+            initial_population.append(individual)
 
         return initial_population
 
@@ -654,31 +754,29 @@ class LSTMAutoencoder(Representation):
         If the model is not functional, the mutation will be used until the model is functional.
         mape - mean absolute percentage error
         num_params - number of model parameters
-        memory_usage_value - bytes used for predicting one value
+        memory_usage - megabytes used for building, training and evaluating of model
 
         :return: [mape, num_params, memory_usage_value]
         """
-        self._build_model()
-        self._train_model()
-
         x_test = self.train_test_data['x_test']
         y_test = self.train_test_data['y_test']
 
-        # Accuracy of forecasting
-        _, mse, mape = self.model.evaluate(x_test, y_test, verbose=False)
+        tracemalloc.start()
+        self._build_model()
+        self._train_model()
+        _, mse, mape = self.model.evaluate(x_test, y_test, verbose=1)
+        current, peak = tracemalloc.get_traced_memory()
+        memory_usage = peak / (1024 ** 2)
 
-        # Computational complexity
         num_params = self.model.count_params()
 
-        # Memory usage
-        memory_usage_tuple = memory_usage((self.model.predict, (x_test,), {'batch_size': 1}))
-        memory_usage_value = max(memory_usage_tuple) - min(memory_usage_tuple)
+        result = [self.get_id(), [mape, num_params, memory_usage]]
 
-        result = [mape, num_params, memory_usage_value]
-
+        # If ant architecture is unable to work, returns nan, mutate it utils it starts work.
         if str(mape) == 'nan':
-            self.mutate()
-            result = self.evaluate()
+            result = [self.get_id(), [math.inf, math.inf, math.inf]]
+            # self.mutate()
+            # result = self.evaluate()
 
         return result
 

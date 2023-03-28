@@ -1,49 +1,89 @@
 """
-BASE INFO
+NSGA2 (Non-dominated Sorting Genetic Algorithm 2) is a multi-objective optimization algorithm based on genetic
+algorithms. NSGA-II uses non-dominated sorting to determine the fitness of individuals in the population,
+rather than a single objective function. NSGA-II maintains a set of solutions that are not dominated by each other
+in terms of multiple objectives, which is known as the Pareto front.
+
+1. Initialize the population with random individuals.
+2. Evaluate each individual based on multiple objectives.
+3. Perform non-dominated sorting to identify the individuals that are not dominated by each other.
+   This creates a set of Pareto fronts.
+4. Assign a crowding distance to each individual within each front to promote diversity within the population.
+5. Create new generation of population using evolutionary operators like selection, mutation and crossover.
+6. Repeat 2-5 till termination criterion is met.
 """
 import random
+import multiprocessing
 from src.representations.representation import Representation
 
 
-class NSGA2:
-    def __init__(self, population_size, max_generations, num_objectives, optimization_directions, mutation_probability,
-                 representation_object=Representation):
-        """
-        NSGA2
+def evaluate_individual(individual):
+    """
+    This function is used to map evaluation on every individual while using multiprocessing.
 
-        :param population_size: Size of population.
-        :param max_generations: Maximal number of generations.
-        :param num_objectives: Number of NSGA2 optimization objectives.
-        :param optimization_directions: Optimization directions for every optimization object,
+    :param individual: Individual of population.
+    :return: Evaluation results.
+    """
+    return individual.evaluate()
+
+
+class NSGA2:
+    def __init__(self, nsga2_parameters, representation_object=Representation):
+        """
+        NSGA2.
+        Representation object needs to have implemented methods of Representation abstract class.
+
+        :nsga2_parameters population_size: Size of population.
+        :nsga2_parameters max_generations: Maximal number of generations.
+        :nsga2_parameters num_objectives: Number of NSGA2 optimization objectives.
+        :nsga2_parameters optimization_directions: Optimization directions for every optimization object,
          for example ['min', 'max', 'min'].
         :param representation_object: Representation object, with predefined abstract methods used in NSGA2.
         """
         self.representation_object = representation_object
-        self.population_size = population_size
-        self.max_generations = max_generations
-        self.num_objectives = num_objectives
-        self.mutation_probability = mutation_probability
-        self.optimization_directions = optimization_directions
+        self.population_size = nsga2_parameters['population_size']
+        self.max_generations = nsga2_parameters['max_generations']
+        self.num_objectives = nsga2_parameters['num_objectives']
+        self.mutation_probability = nsga2_parameters['mutation_probability']
+        self.optimization_directions = nsga2_parameters['optimization_directions']
+        self.use_multiprocessing = nsga2_parameters['use_multiprocessing']
 
         self.population = None
+        # Individuals which are not dominated
+        self.first_front_individuals = []
 
-    # noinspection PyArgumentList
-    def create_initial_population(self):
+    def _create_initial_population(self):
         """
         Creates initial population using representation_object method.
         """
-        self.population = self.representation_object.create_initial_population(self.population_size)
+        self.population = self.representation_object.create_initial_population(population_size=self.population_size)
 
-    def evaluate_population(self):
+    def _evaluate_population(self):
         """
-        Evaluates every individual of population, with representation_object method.
-        # TODO multithreading or multiprocessing
+        Evaluates every individual of population, with representation_object method evaluate.
 
         :return: Evaluation results, for example [[obj1, obj2, obj3], [...], ...].
         """
+        if self.use_multiprocessing:
+            # Multiprocessing evaluation
+            num_processes = multiprocessing.cpu_count()
+            ctx = multiprocessing.get_context('spawn')
+            pool = ctx.Pool(processes=num_processes)
+            results = pool.map(evaluate_individual, self.population)
+            pool.close()
+        else:
+            # Sequential evaluation
+            results = []
+            for i in range(self.population_size):
+                results.append(self.population[i].evaluate())
+
+        # Sort results by population ID
         evaluation_results = []
-        for i in range(self.population_size):
-            evaluation_results.append(self.population[i].evaluate())
+        for individual in self.population:
+            individual_name = individual.get_id()
+            for result in results:
+                if individual_name == result[0]:
+                    evaluation_results.append(result[1])
 
         return evaluation_results
 
@@ -130,97 +170,94 @@ class NSGA2:
         :param front: One front from list of fronts returned from _fast_non_dominated_sort.
         :return: Sorted front.
         """
-        # Calculate the crowding distance for each solution in the front
+        # Initialize the distances list
         distances = [0] * len(front)
+
+        # Calculate the crowding distance for each objective
         for obj in range(self.num_objectives):
+            # Sort the front based on the current objective
             sorted_front = sorted(front, key=lambda x: evaluation_results[x][obj])
-            distances[0] = distances[-1] = float('inf')
+
+            # Update the crowding distances for each solution
             for i in range(1, len(front) - 1):
                 distances[i] += (
                         (evaluation_results[sorted_front[i + 1]][obj] - evaluation_results[sorted_front[i - 1]][obj])
                         / (evaluation_results[sorted_front[-1]][obj] - evaluation_results[sorted_front[0]][obj])
                 )
 
-        # Return the sorted front based on crowding distance
+        # Sort the front based on the crowding distances
         return [x for _, x in sorted(zip(distances, front), reverse=True)]
 
-    def sort_population(self):
+    def _sort_population(self):
         """
         By combining non-dominated sorting and crowding distance sorting, NSGA-II is able to efficiently explore the
         Pareto front and find a diverse set of optimal solutions. This method only sorts individuals in population.
         """
         # Perform the fast non-dominated sort
-        population_results = self.evaluate_population()
-        fronts = self._fast_non_dominated_sort(population_results)
+        evaluation_results = self._evaluate_population()
+
+        fronts = self._fast_non_dominated_sort(evaluation_results)
 
         # Sort each front based on crowding distance
         sorted_population = []
-        for front in fronts:
-            try:
-                sorted_front = self._crowding_distance_sort(population_results, front)
-                sorted_population.extend(sorted_front)
+        for i in range(len(fronts)):
+            sorted_front = self._crowding_distance_sort(evaluation_results, fronts[i])
 
-                # Stop sorting when the sorted population has reached the desired population size
-                if len(sorted_population) >= self.population_size:
-                    break
-            except:
-                pass
+            # Save best individuals and keep them mutated in new generation
+            if i == 1:
+                self.first_front_individuals = [self.population[i] for i in sorted_front]
+
+            sorted_population.extend(sorted_front)
+
+            # Stop sorting when the sorted population has reached the desired population size
+            if len(sorted_population) >= self.population_size:
+                break
 
         # Truncate the sorted population to the desired size
         self.population = [self.population[i] for i in sorted_population[:self.population_size]]
+        print(self.population[0].evaluate())
+        self.population[0].display_representation()
 
-    def new_generation(self):
+    def _new_generation(self):
         """
         Creating a new generation as follows:
 
-        1. The first (best) individual is selected.
-        2. This best individual performs its crossover method with each of the following individuals,
-           from which two offspring are returned until the population size is filled.
-        3. Subsequently, mutation is applied to the individuals with a certain probability.
+        1. First individuals in new population are individuals which are not dominated (first front).
+        2. Rank-based selection: current population is sorted, so first individual has highest chance and last
+           individual has lowest chance to be chosen.
+        3. Choose randomly (with probabilities) 2 individuals and do crossover. Result will be append to new generation.
+        4. At the end mutate every individual in new generation, this step needs to be last because we dont want to
+           change individuals from non dominated front before crossover.
 
-        TODO Not every crossover method can return 2 offsprings -> future update
+        TODO Not every crossover method can return just 1 offsprings -> future update
         """
-        best_individual = self.population[0]
         new_generation = []
-        others_number = (self.population_size // 2) + 1
+        new_generation.extend(self.first_front_individuals)
 
-        print("--------------------------------------------------------------------------------------------")
-        for pop in self.population:
-            pop.display_representation()
+        total_rank = sum(range(self.population_size + 1))
+        ranks = [i + 1 for i in range(self.population_size)]
+        probabilities = [(self.population_size - r + 1) / total_rank for r in ranks]
 
-        for i in range(others_number):
-            print(i + 1)
-            offspring1, offspring2 = best_individual.crossover(self.population[i + 1])
+        # While population is not full
+        while len(new_generation) < self.population_size:
+            parent1, parent2 = random.choices(self.population, weights=probabilities, k=2)
+            # check if the two selected individuals are the same and sample again if they are
+            while parent1 == parent2:
+                parent1, parent2 = random.choices(self.population, weights=probabilities, k=2)
 
-            if random.random() < self.mutation_probability:
-                offspring1 = offspring1.mutate()
+            # Append new offspring from crossover
+            new_generation.append(parent1.crossover(parent2))
 
-            if random.random() < self.mutation_probability:
-                offspring2 = offspring2.mutate()
+        # Mutate every individual in new generation
+        for individual in new_generation:
+            individual.mutate()
 
-            new_generation.append(offspring1)
-            new_generation.append(offspring2)
-
-        new_generation = new_generation[:self.population_size]
         self.population = new_generation
 
-        print("")
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        for pop in self.population:
-            pop.display_representation()
-
     def run(self):
-        """
-        Initialize the population of LSTM Autoencoder representations
+        self._create_initial_population()
 
-        Evaluate the population using the objective functions
-
-        Sort the population into different Pareto fronts based on their non-dominance rank and crowding distance
-
-        Select the solutions for the next generation using a combination of non-domination rank and crowding distance
-
-        Perform genetic operations on the selected solutions to create the next generation
-
-        Evaluate the new population and repeat steps 3-5 until the termination criteria are met
-        """
-        pass
+        for i in range(self.max_generations):
+            print(f"-------------- Generation: {i} --------------")
+            self._sort_population()
+            self._new_generation()
