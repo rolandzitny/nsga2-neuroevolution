@@ -16,10 +16,19 @@ class Representation(ABC):
 
     @abstractmethod
     def create_initial_population(self, population_size):
+        """
+
+        :param population_size:
+        :return:
+        """
         pass
 
     @abstractmethod
     def evaluate(self):
+        """
+
+        :return:
+        """
         pass
 
     @abstractmethod
