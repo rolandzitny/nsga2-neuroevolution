@@ -9,8 +9,7 @@ def load_pareto_fronts(file):
 class LSTMAutoencoderLogger:
     def __init__(self):
         self.log_file = f"{datetime.datetime.now():%Y-%m-%d_%H-%M-%S}.txt"
-        self.log_path = os.path.join(os.getcwd(), "logs", self.log_file)
-        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        self.log_path = os.path.join('logs', self.log_file)
 
         self.mutations_numbers = {
             'LSTM1_ADD':        0,
@@ -26,7 +25,7 @@ class LSTMAutoencoderLogger:
         }
 
     def update_mutation_logs(self, mutation_name):
-        self.mutations_numbers[mutation_name] += 1
+        self.mutations_numbers[mutation_name] = int(self.mutations_numbers[mutation_name]) + 1
 
     def reset_mutation_logs(self):
         self.mutations_numbers['LSTM1_ADD'] = 0
@@ -53,15 +52,15 @@ class LSTMAutoencoderLogger:
             f.write(f"LSTM_REC_ACT={self.mutations_numbers['LSTM_REC_ACT']},")
             f.write(f"LSTM_DROPOUT={self.mutations_numbers['LSTM_DROPOUT']},")
             f.write(f"LSTM_BATCHNORM={self.mutations_numbers['LSTM_BATCHNORM']}\n")
+        self.reset_mutation_logs()
 
     def log_generation(self, generation_number):
         with open(self.log_path, "a") as f:
-            f.write("\n")
             f.write(f"GENERATION {generation_number} PARETO FRONT\n")
 
-    def log_evaluation(self, individual_id, mape, num_params, memory_usage):
+    def log_evaluation(self, individual_id, mse, num_params, memory_usage):
         with open(self.log_path, "a") as f:
-            f.write(f'ID={individual_id}, MAPE={mape}, MODEL_PARAMS={num_params}, MEMORY_USAGE={memory_usage}\n')
+            f.write(f'ID={individual_id},MSE={mse},MODEL_PARAMS={num_params},MEMORY_USAGE={memory_usage}\n')
 
     def log(self, message):
         with open(self.log_path, "a") as f:

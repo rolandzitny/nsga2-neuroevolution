@@ -43,13 +43,14 @@ Class parameters example:
         ('LSTM_BATCHNORM', 0.1)
     ]
 """
+
 import math
 import uuid
 import random
 import tensorflow as tf
 import tracemalloc
-from keras.optimizers import RMSprop
 from keras.losses import MeanSquaredError
+from keras.callbacks import TerminateOnNaN
 from src.representations.representation import Representation
 from keras.layers import LSTM, Dropout, BatchNormalization, TimeDistributed, Dense, RepeatVector
 
@@ -244,10 +245,10 @@ class LSTMAutoencoder(Representation):
         for i in range(self.num_encoder_layers):
             encoder_lstm_layer = {
                 "type": "LSTM",
-                "units": random.choice(self.units),
+                "units": random.randint(self.units[0], self.units[1]),
                 "activation": random.choice(self.activation),
                 "recurrent_activation": random.choice(self.rec_activation),
-                "dropout": random.choice(self.dropout_choices),
+                "dropout": random.uniform(self.dropout_choices[0], self.dropout_choices[1]),
                 "use_batchnorm": random.choice(self.batch_norm_choices)
             }
             self.encoder_layers.append(encoder_lstm_layer)
@@ -256,10 +257,10 @@ class LSTMAutoencoder(Representation):
         for i in range(self.num_decoder_layers):
             decoder_lstm_layer = {
                 "type": "LSTM",
-                "units": random.choice(self.units),
+                "units": random.randint(self.units[0], self.units[1]),
                 "activation": random.choice(self.activation),
                 "recurrent_activation": random.choice(self.rec_activation),
-                "dropout": random.choice(self.dropout_choices),
+                "dropout": random.uniform(self.dropout_choices[0], self.dropout_choices[1]),
                 "use_batchnorm": random.choice(self.batch_norm_choices)
             }
             self.decoder_layers.append(decoder_lstm_layer)
@@ -290,12 +291,12 @@ class LSTMAutoencoder(Representation):
         self.dense_activation = encoded_representation["dense_activation"]
         self.encoder_layers = encoded_representation["encoder_layers"]
         self.decoder_layers = encoded_representation["decoder_layers"]
+        self._check_parameters()
 
     def display_representation(self):
         """
         Display representation of architecture.
         """
-        print("")
         print("Input shape: ", self.input_shape)
         print("Output shape: ", self.output_shape)
         print("Number of encoder LSTM layers:", self.num_encoder_layers)
@@ -308,7 +309,6 @@ class LSTMAutoencoder(Representation):
         print("Decoder:")
         for layer in self.decoder_layers:
             print(layer)
-        print("")
 
     def _build_model(self):
         """
@@ -391,9 +391,9 @@ class LSTMAutoencoder(Representation):
 
         # Create Tensorflow model
         self.model = tf.keras.Model(inputs=inputs, outputs=arch)
-        self.model.compile(optimizer=RMSprop(learning_rate=0.001),
+        self.model.compile(optimizer='adam',
                            loss=MeanSquaredError(),
-                           metrics=['mse', 'mape'])
+                           metrics=['mse'])
         return self.model
 
     def _train_model(self):
@@ -402,6 +402,7 @@ class LSTMAutoencoder(Representation):
 
         :returns: Trained model.
         """
+        nan_stopping = TerminateOnNaN()
         model = self._build_model()
         epochs = self.train_test_data['epochs']
         batch_size = self.train_test_data['batch_size']
@@ -414,6 +415,7 @@ class LSTMAutoencoder(Representation):
                   batch_size=batch_size,
                   validation_data=(x_test, y_test),
                   shuffle=False,
+                  callbacks=[nan_stopping],
                   verbose=0)
 
         self.model = model
@@ -461,11 +463,11 @@ class LSTMAutoencoder(Representation):
 
                 encoder_layers.insert(encoder_length, encoder_lstm_layer)
                 encoded_architecture['encoder_layers'] = encoder_layers
-                encoded_architecture['num_encoder_layers'] = str(encoder_length + 1)
+                encoded_architecture['num_encoder_layers'] = str(int(encoder_length) + 1)
 
                 decoder_layers.insert(0, decoder_lstm_layer)
                 encoded_architecture['decoder_layers'] = decoder_layers
-                encoded_architecture['num_decoder_layers'] = str(decoder_length + 1)
+                encoded_architecture['num_decoder_layers'] = str(int(decoder_length) + 1)
                 if self.logger is not None:
                     self.logger.update_mutation_logs('LSTM2_ADD')
                 return encoded_architecture
@@ -477,11 +479,11 @@ class LSTMAutoencoder(Representation):
 
                 encoder_layers.insert(encoder_length, encoder_lstm_layer)
                 encoded_architecture['encoder_layers'] = encoder_layers
-                encoded_architecture['num_encoder_layers'] = str(encoder_length + 1)
+                encoded_architecture['num_encoder_layers'] = str(int(encoder_length) + 1)
 
                 decoder_layers.insert(0, decoder_lstm_layer)
                 encoded_architecture['decoder_layers'] = decoder_layers
-                encoded_architecture['num_decoder_layers'] = str(decoder_length + 1)
+                encoded_architecture['num_decoder_layers'] = str(int(decoder_length) + 1)
                 if self.logger is not None:
                     self.logger.update_mutation_logs('LSTM2_ADD')
                 return encoded_architecture
@@ -508,10 +510,10 @@ class LSTMAutoencoder(Representation):
             decoder_layers.pop(0)
 
             encoded_architecture['encoder_layers'] = encoder_layers
-            encoded_architecture['num_encoder_layers'] = str(encoder_length - 1)
+            encoded_architecture['num_encoder_layers'] = str(int(encoder_length) - 1)
 
             encoded_architecture['decoder_layers'] = decoder_layers
-            encoded_architecture['num_decoder_layers'] = str(decoder_length - 1)
+            encoded_architecture['num_decoder_layers'] = str(int(decoder_length) - 1)
             if self.logger is not None:
                 self.logger.update_mutation_logs('LSTM2_REMOVE')
             return encoded_architecture
@@ -633,7 +635,7 @@ class LSTMAutoencoder(Representation):
 
         encoded_architecture = self.encode()
         lstm_layers = encoded_architecture[architecture_part[1]]
-        random_lstm_layer_idx = random.randint(0, len(lstm_layers)-1)
+        random_lstm_layer_idx = random.randint(0, len(lstm_layers) - 1)
         random_lstm_layer = lstm_layers[random_lstm_layer_idx]
         current_lstm_units = random_lstm_layer['units']
         lower_bound = int(current_lstm_units * (1 - change_rate))
@@ -769,6 +771,7 @@ class LSTMAutoencoder(Representation):
         :mutation_parameters max_lstm_layers: Defines maximal number of lstm layers in encoder and decoder parts.
         :mutation_parameters change_rate: Rate of units change, for example 0.2.
         """
+        self._check_parameters()
         mutated_architecture = self.encode()
         # Choose only unique mutations
         if self.unique:
@@ -824,6 +827,25 @@ class LSTMAutoencoder(Representation):
 
         return self
 
+    def _check_parameters(self):
+        if self.num_encoder_layers > self.max_lstm_layers:
+            self.num_encoder_layers = self.max_lstm_layers
+
+        if self.num_decoder_layers > self.max_lstm_layers:
+            self.num_decoder_layers = self.max_lstm_layers
+
+        if len(self.encoder_layers) > self.max_lstm_layers:
+            self.encoder_layers = self.encoder_layers[:(int(self.max_lstm_layers) - 1)]
+
+        if len(self.decoder_layers) > self.max_lstm_layers:
+            self.decoder_layers = self.decoder_layers[:(int(self.max_lstm_layers) - 1)]
+
+        if len(self.encoder_layers) != self.num_encoder_layers:
+            self.num_encoder_layers = len(self.encoder_layers)
+
+        if len(self.decoder_layers) != self.num_decoder_layers:
+            self.num_decoder_layers = len(self.decoder_layers)
+
     def crossover(self, other_representation):
         """
         One-point crossover of two architectures. Crossover point is chosen randomly.
@@ -874,11 +896,11 @@ class LSTMAutoencoder(Representation):
         """
         Evaluate LSTM Autoencoder.
         If the model is not functional, the mutation will be used until the model is functional.
-        mape - mean absolute percentage error
+        mse - mean square error
         num_params - number of model parameters
         memory_usage - megabytes used for building, training and evaluating of model
 
-        :return: [mape, num_params, memory_usage_value]
+        :return: [mse, num_params, memory_usage_value]
         """
         x_test = self.train_test_data['x_test']
         y_test = self.train_test_data['y_test']
@@ -886,17 +908,20 @@ class LSTMAutoencoder(Representation):
         tracemalloc.start()
         self._build_model()
         self._train_model()
-        _, mse, mape = self.model.evaluate(x_test, y_test, verbose=1)
+        _, mse = self.model.evaluate(x_test, y_test, verbose=1)
         current, peak = tracemalloc.get_traced_memory()
         memory_usage = peak / (1024 ** 2)
 
         num_params = self.model.count_params()
 
-        result = [self.get_id(), [mape, num_params, memory_usage]]
+        result = [self.get_id(), [mse, num_params, memory_usage]]
 
         # If ant architecture is unable to work, returns nan, mutate it utils it starts work.
-        if str(mape) == 'nan':
+        if str(mse) == 'nan':
             result = [self.get_id(), [math.inf, math.inf, math.inf]]
+
+        self.model = None
+        del self.model
 
         return result
 

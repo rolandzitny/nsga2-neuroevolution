@@ -5,4 +5,3 @@ A set of networks will be designed that are Pareto optimal in terms of accuracy,
 
 - Python, Tensorflow
 - NSGA2
-- https://pypi.org/project/py-paretoarchive/

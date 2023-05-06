@@ -7,40 +7,40 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 # NSGA2 parameters
-MAX_GENERATIONS = 3
-POPULATION_SIZE = 10
-ARCHIVE_SIZE = 5                # Size of archive of the best solutions yet obtained.
+MAX_GENERATIONS = 15
+POPULATION_SIZE = 100
+ARCHIVE_SIZE = 10                # Size of archive of the best solutions yet obtained.
 NUM_OBJECTIVES = 3
 OPTIMIZATION_DIRECTIONS = ['min', 'min', 'min']
-MUTATION_PROBABILITY = 0.9
-USE_MULTIPROCESSING = False      # Multiprocessing for evaluation.
+MUTATION_PROBABILITY = 0.5
+USE_MULTIPROCESSING = False     # Multiprocessing for evaluation.
 DISCARD_INDIVIDUALS = True      # Discard individuals with nan/info evaluation results
 
 # LSTM Autoencoder parameters
 MUTATION_NUMBER = 1             # Number of executed mutations.
 UNIQUE = True                   # If number of mutation > 1, choose unique methods, max 10.
 LSTM_RANDOM = True              # Initialize new LSTM layer at random.
-MAX_LSTM_LAYERS = 2
-CHANGE_RATE = 0.3               # Rate of units and dropout change, 0.2 -> range(-20% , +20%)
+MAX_LSTM_LAYERS = 5
+CHANGE_RATE = 0.2               # Rate of units and dropout change, 0.2 -> range(-20% , +20%)
 
-LSTM_UNITS = (8, 16)
-LSTM_ACTIVATION = ['sigmoid', 'tanh', 'relu', 'softmax', 'linear']
-LSTM_REC_ACTIVATION = ['sigmoid', 'hard_sigmoid', 'tanh']
+LSTM_UNITS = (16, 512)
+LSTM_ACTIVATION = ['tanh']  # ['sigmoid', 'tanh', 'relu', 'softmax', 'linear']
+LSTM_REC_ACTIVATION = ['sigmoid']  # ['sigmoid', 'hard_sigmoid', 'tanh']
 DENSE_ACTIVATION = ['sigmoid', 'tanh', 'softmax', 'linear']
-DROPOUT = (0.0, 0.5)
+DROPOUT = (0.0, 0.2)
 BATCH_NORM = [True, False]
 
-TRAIN_EPOCHS = 1
-BATCH_SIZE = 32
+TRAIN_EPOCHS = 20
+BATCH_SIZE = 16
 
 LSTM1_ADD_PROB = 0.1
-LSTM1_REMOVE_PROB = 0.1
+LSTM1_REMOVE_PROB = 0.01
 LSTM2_ADD_PROB = 0.1
-LSTM2_REMOVE_PROB = 0.1
-DENSE_ACT_PROB = 0.8
+LSTM2_REMOVE_PROB = 0.01
+DENSE_ACT_PROB = 0.1
 LSTM_UNITS_PROB = 0.1
-LSTM_ACT_PROB = 0.1
-LSTM_REC_ACT_PROB = 0.1
+LSTM_ACT_PROB = 0.0
+LSTM_REC_ACT_PROB = 0.0
 LSTM_DROPOUT_PROB = 0.1
 LSTM_BATCHNORM_PROB = 0.1
 
@@ -151,11 +151,9 @@ def main():
 
 
 if __name__ == '__main__':
-
-    # Nromal = 2
-    # GPU = 12
-    # TPU = 40
-    main()
+    # Number of executed experiments.
+    for i in range(10):
+        main()
 
 
 

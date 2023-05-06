@@ -24,6 +24,8 @@ Class parameter example:
     }
 
 """
+import gc
+import copy
 import math
 import random
 import multiprocessing
@@ -80,6 +82,10 @@ class NSGA2:
         """
         self.population = self.representation_object.create_initial_population(population_size=self.population_size)
 
+        # print('loaded')
+        # with open("/content/drive/MyDrive/NSGA2/population6.pkl", "rb") as f:
+        #    self.population = pickle.load(f)
+
     def _update_archive(self, pareto_optimal_solution_indexes):
         """
         Update archive of the best solutions yet obtained. Those solutions will be used in new generation.
@@ -90,11 +96,11 @@ class NSGA2:
         solutions = [self.population[i] for i in pareto_optimal_solution_indexes]
         eval_results = [self.evaluation_results[i] for i in pareto_optimal_solution_indexes]
 
-        # TODO logging
+        # Log pareto front of current population.
         if self.logger is not None:
             for i in range(len(solutions)):
                 self.logger.log_evaluation(individual_id=solutions[i].get_id(),
-                                           mape=eval_results[i][0],
+                                           mse=eval_results[i][0],
                                            num_params=eval_results[i][1],
                                            memory_usage=eval_results[i][2])
 
@@ -113,12 +119,12 @@ class NSGA2:
 
         new_archive = []
         for i in range(len(new_archive_solutions)):
-            new_archive.append((new_archive_solutions[i], new_archive_results[i]))
+            new_archive.append((copy.deepcopy(new_archive_solutions[i]), copy.deepcopy(new_archive_results[i])))
 
         # Fill new archive with solutions which are not included
         for i in range(len(all_solutions)):
             if all_solutions[i] not in new_archive_solutions:
-                new_archive.append((all_solutions[i], all_results[i]))
+                new_archive.append((copy.deepcopy(all_solutions[i]), copy.deepcopy(all_results[i])))
 
         # Resize new archive to archive size
         new_archive = new_archive[:self.archive_size]
@@ -152,7 +158,7 @@ class NSGA2:
 
         # Multiprocessing
         if self.use_multiprocessing:
-            num_processes = multiprocessing.cpu_count()
+            num_processes = multiprocessing.cpu_count() // 2  # Use only half of possible cores
             ctx = multiprocessing.get_context('spawn')
             pool = ctx.Pool(processes=num_processes)
             results = pool.map(evaluate_individual, self.population)
@@ -274,8 +280,9 @@ class NSGA2:
                     distances[i] += 0
                 else:
                     distances[i] += (
-                        (evaluation_results[sorted_front[i + 1]][obj] - evaluation_results[sorted_front[i - 1]][obj])
-                        / (evaluation_results[sorted_front[-1]][obj] - evaluation_results[sorted_front[0]][obj])
+                            (evaluation_results[sorted_front[i + 1]][obj] - evaluation_results[sorted_front[i - 1]][
+                                obj])
+                            / (evaluation_results[sorted_front[-1]][obj] - evaluation_results[sorted_front[0]][obj])
                     )
 
         # Sort the front based on the crowding distances
@@ -355,11 +362,14 @@ class NSGA2:
                 parent1, parent2 = random.choices(all_possible_individuals, weights=probabilities, k=2)
 
             # Append new offspring from crossover
-            new_generation.append(parent1.crossover(parent2))
+            child = parent1.crossover(parent2)
+            # child.display_representation()
+            new_generation.append(child)
 
         # Mutate every individual in new generation
         for individual in new_generation:
             if random.random() < self.mutation_probability:
+                individual._check_parameters()
                 individual.mutate()
 
         self.population = new_generation
@@ -368,14 +378,22 @@ class NSGA2:
         self._create_initial_population()
 
         for i in range(self.max_generations):
-
+            print(f'Generation {i + 1}')
             if self.logger is not None:
-                self.logger.log_generation(i)
+                self.logger.log_generation(i + 1)
 
             self._evaluate_population()
             self._sort_population()
             self._new_generation()
+            import pickle
+            file_name = 'population' + str(i) + '.pkl'
+            with open("/content/drive/MyDrive/NSGA2/" + file_name, "wb") as f:
+                pickle.dump(self.population, f)
 
-            if self.logger is not None:
-                self.logger.log_mutations()
-                self.logger.reset_mutation_logs()
+            gc.collect()
+
+        print("Archive solutions:")
+        for individual, eval_results in self.archive:
+            print("------------------------------------------------------------------------------------------------")
+            print(f'MSE: {eval_results[0]} MODEL_PARAMS: {eval_results[1]} MEMORY_USAGE: {eval_results[2]}')
+            individual.display_representation()
