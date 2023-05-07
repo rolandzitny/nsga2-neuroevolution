@@ -3,6 +3,7 @@ from src.utils.logger import LSTMAutoencoderLogger
 from src.utils.dataset_tools import get_training_testing_windows
 from src.representations.lstm_autoencoder import LSTMAutoencoder
 from src.evolution_algorithms.nsga2.nsga2 import NSGA2
+from src.utils.graph_tools import create_pareto_fronts_folder
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
