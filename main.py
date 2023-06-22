@@ -3,30 +3,29 @@ from src.utils.logger import LSTMAutoencoderLogger
 from src.utils.dataset_tools import get_training_testing_windows
 from src.representations.lstm_autoencoder import LSTMAutoencoder
 from src.evolution_algorithms.nsga2.nsga2 import NSGA2
-from src.utils.graph_tools import create_pareto_fronts_folder
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 # NSGA2 parameters
 MAX_GENERATIONS = 15
 POPULATION_SIZE = 100
-ARCHIVE_SIZE = 10                # Size of archive of the best solutions yet obtained.
+ARCHIVE_SIZE = 10                       # Size of archive of the best solutions yet obtained.
 NUM_OBJECTIVES = 3
 OPTIMIZATION_DIRECTIONS = ['min', 'min', 'min']
 MUTATION_PROBABILITY = 0.5
-USE_MULTIPROCESSING = False     # Multiprocessing for evaluation.
-DISCARD_INDIVIDUALS = True      # Discard individuals with nan/info evaluation results
+USE_MULTIPROCESSING = False             # Multiprocessing for evaluation.
+DISCARD_INDIVIDUALS = True              # Discard individuals with nan/info evaluation results
 
 # LSTM Autoencoder parameters
-MUTATION_NUMBER = 1             # Number of executed mutations.
-UNIQUE = True                   # If number of mutation > 1, choose unique methods, max 10.
-LSTM_RANDOM = True              # Initialize new LSTM layer at random.
+MUTATION_NUMBER = 1                     # Number of executed mutations.
+UNIQUE = True                           # If number of mutation > 1, choose unique methods, max 10.
+LSTM_RANDOM = True                      # Initialize new LSTM layer at random.
 MAX_LSTM_LAYERS = 5
-CHANGE_RATE = 0.2               # Rate of units and dropout change, 0.2 -> range(-20% , +20%)
+CHANGE_RATE = 0.2                       # Rate of units and dropout change, 0.2 -> range(-20% , +20%)
 
 LSTM_UNITS = (16, 512)
-LSTM_ACTIVATION = ['tanh']  # ['sigmoid', 'tanh', 'relu', 'softmax', 'linear']
-LSTM_REC_ACTIVATION = ['sigmoid']  # ['sigmoid', 'hard_sigmoid', 'tanh']
+LSTM_ACTIVATION = ['tanh']              # ['sigmoid', 'tanh', 'relu', 'softmax', 'linear']
+LSTM_REC_ACTIVATION = ['sigmoid']       # ['sigmoid', 'hard_sigmoid', 'tanh']
 DENSE_ACTIVATION = ['sigmoid', 'tanh', 'softmax', 'linear']
 DROPOUT = (0.0, 0.2)
 BATCH_NORM = [True, False]
